@@ -1,0 +1,3 @@
+opencv-python>=4.9
+mediapipe==0.10.35
+legoeducation>=1.0.6
