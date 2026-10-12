@@ -1,0 +1,10 @@
+legoeducation
+mediapipe
+certifi
+opencv-python
+numpy
+paho-mqtt>=2.0
+pyaudio
+scikit-learn
+joblib
+pytest
