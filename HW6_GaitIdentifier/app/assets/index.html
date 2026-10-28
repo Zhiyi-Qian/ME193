@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gait</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F7F7F4;
+    --ink: #1A1C20;
+    --muted: #6B7079;
+    --grid: #E2E3DF;
+    --standing: #56657F;
+    --walking: #2F8A55;
+    --running: #E0482F;
+    --biking: #7448D1;
+    --none: #A3A7AE;
+    --x: #E0482F; --y: #2F8A55; --z: #3466D6;
+    --font: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181C; --ink: #F1F1EE; --muted: #9BA0A8; --grid: #2A2D33;
+      --standing: #7D8DAA; --walking: #43B072; --running: #FF6548; --biking: #9B76F0;
+      --none: #5C6068; --x: #FF6548; --y: #43B072; --z: #6C96FF;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); }
+  body { padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+
+  /* The one bold thing: a field that floods with the current activity's colour */
+  .field {
+    --c: var(--none);
+    background: var(--c);
+    color: #fff;
+    padding: 28px 24px 24px;
+    transition: background-color 400ms ease;
+    min-height: 46vh;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .top { display: flex; justify-content: space-between; align-items: center; font-size: 15px; opacity: .9; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #fff; opacity: .35; margin-right: 8px; }
+  .dot.on { opacity: 1; }
+  .word {
+    font-weight: 900; font-stretch: 62%;
+    font-size: clamp(72px, 22vw, 220px);
+    line-height: .86; letter-spacing: -0.01em;
+    margin: 24px 0 8px;
+    overflow-wrap: anywhere;
+  }
+  .sub { font-size: 18px; font-stretch: 100%; opacity: .92; }
+  @media (prefers-reduced-motion: reduce) { .field { transition: none; } }
+
+  main { padding: 20px 24px 40px; max-width: 900px; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+  .model { border-left: 6px solid var(--none); padding: 2px 0 2px 12px; }
+  .model .name { color: var(--muted); font-size: 14px; }
+  .model .guess { font-size: 30px; font-weight: 800; font-stretch: 75%; margin-top: 2px; }
+  .model .acc { color: var(--muted); font-size: 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  h2 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
+  .strip { display: flex; gap: 2px; height: 18px; margin-bottom: 4px; }
+  .strip span { flex: 1; background: var(--grid); border-radius: 2px; }
+  .strip-label { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin: 6px 0 26px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  .plot { margin-bottom: 22px; }
+  canvas { width: 100%; height: 160px; display: block; }
+  .keys { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .keys b { font-weight: 700; }
+</style>
+</head>
+<body>
+  <section class="field" id="field">
+    <div class="top">
+      <span><span class="dot" id="dot"></span><span id="conn">Connecting to the board</span></span>
+      <span id="mode"></span>
+    </div>
+    <div>
+      <div class="word" id="word">Waiting</div>
+      <div class="sub" id="sub">Start the App on the UNO Q and keep the sensor still for one second.</div>
+    </div>
+  </section>
+
+  <main>
+    <div class="compare" id="compare">
+      <div class="model" id="m1"><div class="name">Model 1, peak acceleration only</div><div class="guess">–</div><div class="acc"></div></div>
+      <div class="model" id="m2"><div class="name">Model 2, all six IMU outputs</div><div class="guess">–</div><div class="acc"></div></div>
+    </div>
+
+    <h2>Last 60 seconds</h2>
+    <div class="strip" id="strip2"></div>
+    <p class="strip-label">Model 2</p>
+    <div class="strip" id="strip1"></div>
+    <p class="strip-label">Model 1</p>
+    <div class="legend">
+      <span><i style="background:var(--standing)"></i>Standing</span>
+      <span><i style="background:var(--walking)"></i>Walking</span>
+      <span><i style="background:var(--running)"></i>Running</span>
+      <span><i style="background:var(--biking)"></i>Biking</span>
+    </div>
+
+    <div class="plot">
+      <h2>Acceleration (g)</h2>
+      <canvas id="acc"></canvas>
+      <div class="keys"><b style="color:var(--x)">x</b>&nbsp; <b style="color:var(--y)">y</b>&nbsp; <b style="color:var(--z)">z</b></div>
+    </div>
+    <div class="plot">
+      <h2>Rotation (degrees per second)</h2>
+      <canvas id="gyro"></canvas>
+      <div class="keys"><b style="color:var(--x)">x</b>&nbsp; <b style="color:var(--y)">y</b>&nbsp; <b style="color:var(--z)">z</b></div>
+    </div>
+  </main>
+
+<script src="libs/socket.io.min.js"></script>
+<script>
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const colorOf = (label) => `var(--${["standing", "walking", "running", "biking"].includes(label) ? label : "none"})`;
+  const nice = (s) => s ? s[0].toUpperCase() + s.slice(1) : "–";
+
+  // ---------- live plots ----------
+  const N = 250;  // 5 seconds at 50 Hz
+  const accBuf = [[], [], []], gyroBuf = [[], [], []];
+
+  function draw(canvas, bufs, minSpan) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    let lo = Infinity, hi = -Infinity;
+    bufs.forEach(b => b.forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
+    if (!isFinite(lo)) { lo = -minSpan / 2; hi = minSpan / 2; }
+    const mid = (lo + hi) / 2, span = Math.max(hi - lo, minSpan) * 1.15;
+    lo = mid - span / 2; hi = mid + span / 2;
+    const y = v => h - (v - lo) / (hi - lo) * h;
+
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    if (lo < 0 && hi > 0) { ctx.beginPath(); ctx.moveTo(0, y(0)); ctx.lineTo(w, y(0)); ctx.stroke(); }
+    ctx.fillStyle = css("--muted"); ctx.font = "12px " + css("--font");
+    ctx.fillText(hi.toFixed(1), 4, 13); ctx.fillText(lo.toFixed(1), 4, h - 4);
+
+    ["--x", "--y", "--z"].forEach((c, i) => {
+      const b = bufs[i]; if (b.length < 2) return;
+      ctx.strokeStyle = css(c); ctx.lineWidth = 1.6; ctx.beginPath();
+      b.forEach((v, j) => { const px = (j + N - b.length) / (N - 1) * w; j ? ctx.lineTo(px, y(v)) : ctx.moveTo(px, y(v)); });
+      ctx.stroke();
+    });
+  }
+
+  let dirty = false;
+  function frame() {
+    if (dirty) { draw(acc, accBuf, 2); draw(gyro, gyroBuf, 100); dirty = false; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  window.addEventListener("resize", () => { dirty = true; });
+
+  // ---------- prediction history strips ----------
+  const HIST = 60;
+  const hist1 = [], hist2 = [];
+  function renderStrip(el, hist) {
+    el.innerHTML = "";
+    for (let i = 0; i < HIST; i++) {
+      const s = document.createElement("span");
+      const label = hist[i - (HIST - hist.length)];
+      if (label) s.style.background = colorOf(label);
+      el.appendChild(s);
+    }
+  }
+  renderStrip(strip1, hist1); renderStrip(strip2, hist2);
+
+  function setModel(el, label, accVal, truth) {
+    el.style.borderLeftColor = colorOf(label);
+    el.querySelector(".guess").textContent = nice(label);
+    el.querySelector(".acc").textContent =
+      accVal !== undefined ? `${Math.round(accVal * 100)}% correct while ${truth}` : "";
+  }
+
+  // ---------- connection ----------
+  const socket = io(`http://${window.location.host}`);
+  socket.on("connect", () => { dot.classList.add("on"); conn.textContent = "Connected"; });
+  socket.on("disconnect", () => { dot.classList.remove("on"); conn.textContent = "Disconnected, check that the App is running"; });
+
+  socket.on("samples", (data) => {
+    data.rows.forEach(r => {
+      for (let i = 0; i < 3; i++) {
+        accBuf[i].push(r[i]); gyroBuf[i].push(r[i + 3]);
+        if (accBuf[i].length > N) accBuf[i].shift();
+        if (gyroBuf[i].length > N) gyroBuf[i].shift();
+      }
+    });
+    dirty = true;
+  });
+
+  socket.on("status", (d) => {
+    mode.textContent = "Recording";
+    field.style.setProperty("--c", colorOf(d.label));
+    word.textContent = nice(d.label);
+    sub.textContent = `Recording training data: ${(d.count / 50).toFixed(0)} s saved`;
+  });
+
+  socket.on("prediction", (d) => {
+    mode.textContent = "Live";
+    field.style.setProperty("--c", colorOf(d.m2));
+    word.textContent = nice(d.m2);
+    sub.textContent = d.m1 === d.m2 ? "Both models agree" : `Model 1 thinks ${d.m1}`;
+    setModel(m1, d.m1, d.acc1, d.truth);
+    setModel(m2, d.m2, d.acc2, d.truth);
+    hist1.push(d.m1); hist2.push(d.m2);
+    if (hist1.length > HIST) { hist1.shift(); hist2.shift(); }
+    renderStrip(strip1, hist1); renderStrip(strip2, hist2);
+  });
+</script>
+</body>
+</html>
