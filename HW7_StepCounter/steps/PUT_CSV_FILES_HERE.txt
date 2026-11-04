@@ -1,0 +1,1 @@
+Put the 10 CSV recordings from ~/Desktop/ME193HW_steps/steps here, then delete this file.

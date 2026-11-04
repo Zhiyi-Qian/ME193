@@ -1,0 +1,1 @@
+Put predicted_vs_true.png and loss_curve.png from ~/Desktop/ME193HW_steps/plots here, then delete this file.

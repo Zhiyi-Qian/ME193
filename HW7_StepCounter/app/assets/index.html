@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Step counter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F7F7F4; --ink: #1A1C20; --muted: #6B7079; --grid: #E2E3DF;
+    --walking: #2F8A55; --still: #56657F;
+    --x: #E0482F; --y: #2F8A55; --z: #3466D6;
+    --font: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181C; --ink: #F1F1EE; --muted: #9BA0A8; --grid: #2A2D33;
+      --walking: #43B072; --still: #7D8DAA;
+      --x: #FF6548; --y: #43B072; --z: #6C96FF;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); }
+  body { padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+
+  .field {
+    --c: var(--still);
+    background: var(--c); color: #fff;
+    padding: 24px 24px 26px; min-height: 52vh;
+    display: flex; flex-direction: column; justify-content: space-between;
+    transition: background-color 500ms ease;
+  }
+  .top { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #fff; opacity: .35; margin-right: 8px; }
+  .dot.on { opacity: 1; }
+  button {
+    font: 600 15px var(--font); color: #fff; background: rgba(255,255,255,.16);
+    border: 1px solid rgba(255,255,255,.5); border-radius: 999px; padding: 8px 16px; cursor: pointer;
+  }
+  button:active { background: rgba(255,255,255,.3); }
+  .count {
+    font-weight: 900; font-stretch: 62%; line-height: .82;
+    font-size: clamp(120px, 38vw, 320px); font-variant-numeric: tabular-nums;
+    margin-top: 24px;
+  }
+  .unit { font-size: 26px; font-weight: 700; font-stretch: 80%; margin-top: 6px; }
+  .stats { display: flex; gap: 36px; margin-top: 18px; font-size: 16px; opacity: .92; }
+  .stats b { display: block; font-size: 30px; font-weight: 800; font-stretch: 75%; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .field { transition: none; } }
+
+  main { padding: 22px 24px 40px; max-width: 900px; }
+  h2 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin-bottom: 6px; }
+  .bars span { flex: 1; background: var(--grid); border-radius: 2px 2px 0 0; min-height: 2px; }
+  .note { font-size: 13px; color: var(--muted); margin: 0 0 26px; }
+  .plot { margin-bottom: 22px; }
+  canvas { width: 100%; height: 150px; display: block; }
+  .keys { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .keys b { font-weight: 700; }
+</style>
+</head>
+<body>
+  <section class="field" id="field">
+    <div class="top">
+      <span><span class="dot" id="dot"></span><span id="conn">Connecting to the board</span></span>
+      <button id="reset">Reset</button>
+    </div>
+    <div>
+      <div class="count" id="count">0</div>
+      <div class="unit">steps</div>
+      <div class="stats">
+        <div><b id="cadence">0</b>steps per minute</div>
+        <div><b id="state">Still</b>right now</div>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <h2>Steps found each second, last 60 seconds</h2>
+    <div class="bars" id="bars"></div>
+    <p class="note">Each bar is one output of the neural net: the steps it counted in one second of sensor data.</p>
+
+    <div class="plot">
+      <h2>Acceleration (g)</h2>
+      <canvas id="acc"></canvas>
+      <div class="keys"><b style="color:var(--x)">x</b>&nbsp; <b style="color:var(--y)">y</b>&nbsp; <b style="color:var(--z)">z</b></div>
+    </div>
+    <div class="plot">
+      <h2>Rotation (degrees per second)</h2>
+      <canvas id="gyro"></canvas>
+      <div class="keys"><b style="color:var(--x)">x</b>&nbsp; <b style="color:var(--y)">y</b>&nbsp; <b style="color:var(--z)">z</b></div>
+    </div>
+  </main>
+
+<script src="libs/socket.io.min.js"></script>
+<script>
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  // ---------- live plots ----------
+  const N = 250;
+  const accBuf = [[], [], []], gyroBuf = [[], [], []];
+  function draw(canvas, bufs, minSpan) {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    let lo = Infinity, hi = -Infinity;
+    bufs.forEach(b => b.forEach(v => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
+    if (!isFinite(lo)) { lo = -minSpan / 2; hi = minSpan / 2; }
+    const mid = (lo + hi) / 2, span = Math.max(hi - lo, minSpan) * 1.15;
+    lo = mid - span / 2; hi = mid + span / 2;
+    const y = v => h - (v - lo) / (hi - lo) * h;
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    if (lo < 0 && hi > 0) { ctx.beginPath(); ctx.moveTo(0, y(0)); ctx.lineTo(w, y(0)); ctx.stroke(); }
+    ctx.fillStyle = css("--muted"); ctx.font = "12px " + css("--font");
+    ctx.fillText(hi.toFixed(1), 4, 13); ctx.fillText(lo.toFixed(1), 4, h - 4);
+    ["--x", "--y", "--z"].forEach((c, i) => {
+      const b = bufs[i]; if (b.length < 2) return;
+      ctx.strokeStyle = css(c); ctx.lineWidth = 1.6; ctx.beginPath();
+      b.forEach((v, j) => { const px = (j + N - b.length) / (N - 1) * w; j ? ctx.lineTo(px, y(v)) : ctx.moveTo(px, y(v)); });
+      ctx.stroke();
+    });
+  }
+  let dirty = false;
+  (function frame() { if (dirty) { draw(acc, accBuf, 2); draw(gyro, gyroBuf, 100); dirty = false; } requestAnimationFrame(frame); })();
+  window.addEventListener("resize", () => { dirty = true; });
+
+  // ---------- per-second bars ----------
+  const HIST = 60, hist = [];
+  function renderBars() {
+    bars.innerHTML = "";
+    for (let i = 0; i < HIST; i++) {
+      const v = hist[i - (HIST - hist.length)];
+      const s = document.createElement("span");
+      if (v !== undefined) {
+        s.style.height = Math.min(100, v / 3 * 100) + "%";
+        s.style.background = v > 0.3 ? css("--walking") : css("--still");
+      }
+      bars.appendChild(s);
+    }
+  }
+  renderBars();
+
+  // ---------- connection ----------
+  const socket = io(`http://${window.location.host}`);
+  socket.on("connect", () => { dot.classList.add("on"); conn.textContent = "Connected"; });
+  socket.on("disconnect", () => { dot.classList.remove("on"); conn.textContent = "Disconnected, check that the App is running"; });
+
+  socket.on("samples", (d) => {
+    d.rows.forEach(r => {
+      for (let i = 0; i < 3; i++) {
+        accBuf[i].push(r[i]); gyroBuf[i].push(r[i + 3]);
+        if (accBuf[i].length > N) accBuf[i].shift();
+        if (gyroBuf[i].length > N) gyroBuf[i].shift();
+      }
+    });
+    dirty = true;
+  });
+
+  socket.on("steps", (d) => {
+    count.textContent = d.total;
+    cadence.textContent = d.cadence;
+    const walking = d.last > 0.3;
+    state.textContent = walking ? "Walking" : "Still";
+    field.style.setProperty("--c", walking ? "var(--walking)" : "var(--still)");
+    if (d.reset) hist.length = 0;
+    else { hist.push(d.last); if (hist.length > HIST) hist.shift(); }
+    renderBars();
+  });
+
+  reset.addEventListener("click", () => fetch("/reset").catch(() => {}));
+</script>
+</body>
+</html>

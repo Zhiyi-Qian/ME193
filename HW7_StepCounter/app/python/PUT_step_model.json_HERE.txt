@@ -1,0 +1,1 @@
+Put step_model.json here (from ~/Desktop/ME193HW_steps), then delete this file.
