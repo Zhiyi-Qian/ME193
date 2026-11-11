@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finger lock hardware test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 420px; margin: 2rem auto; padding: 0 1rem; }
+  button { display: block; width: 100%; margin: .5rem 0; padding: .8rem; font-size: 1rem; }
+  #out { margin-top: 1rem; color: #555; }
+</style>
+</head>
+<body>
+<h1>Hardware test</h1>
+<button onclick="hit('/api/leds_on')">LEDs on</button>
+<button onclick="hit('/api/leds_off')">LEDs off</button>
+<button onclick="hit('/api/unlock')">Unlock (motor open)</button>
+<button onclick="hit('/api/lock')">Lock (motor closed)</button>
+<button onclick="hit('/api/fail')">Wrong-code flash</button>
+<button onclick="hit('/api/button')">Was the button pressed?</button>
+<div id="out"></div>
+<script>
+async function hit(path) {
+  try {
+    const r = await fetch(path);
+    document.getElementById('out').textContent = path + ' -> ' + await r.text();
+  } catch (e) {
+    document.getElementById('out').textContent = 'Error: ' + e;
+  }
+}
+</script>
+</body>
+</html>
